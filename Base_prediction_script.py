@@ -5,7 +5,6 @@ import whisper
 
 
 # TODO Rename 907 - 1058
-# TODO Try if Predictions differ when using a prompt
 
 
 def main():

@@ -39,5 +39,4 @@ if __name__ == "__main__":
 
     signal_1, transcription_1, _ = emergency_call_dataset[1]
 
-
     a = 1

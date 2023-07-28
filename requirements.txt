@@ -16,3 +16,4 @@ torchaudio~=2.0.2
 evaluate~=0.4.0
 tensorboardx
 accelerate
+pydub~=0.25.1
