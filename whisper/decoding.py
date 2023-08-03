@@ -146,7 +146,7 @@ class PyTorchInference(Inference):
         self.kv_cache = {}
         self.hooks = []
 
-        key_modules = [block.attn.key for block in self.model.decoder.blocks]
+        key_modules = [block.attn.key for block in self.model.decoder.layers]
         value_modules = [block.attn.value for block in self.model.decoder.blocks]
         self.kv_modules = key_modules + value_modules
 
@@ -514,14 +514,14 @@ class DecodingTask:
 
         language = options.language or "en"
         tokenizer = get_tokenizer(
-            model.is_multilingual, language=language, task=options.task
+            True, language=language, task=options.task
         )
         self.tokenizer: Tokenizer = tokenizer
         self.options: DecodingOptions = self._verify_options(options)
 
         self.n_group: int = options.beam_size or options.best_of or 1
-        self.n_ctx: int = model.dims.n_text_ctx
-        self.sample_len: int = options.sample_len or model.dims.n_text_ctx // 2
+        self.n_ctx: int = 448  # model.dims.n_text_ctx
+        self.sample_len: int = options.sample_len or self.n_ctx // 2
 
         self.sot_sequence: Tuple[int] = tokenizer.sot_sequence
         if self.options.without_timestamps:

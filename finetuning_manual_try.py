@@ -2,8 +2,11 @@
 
 import evaluate
 import torch
+from torch.utils.data import DataLoader
+
+import whisper
 from transformers import WhisperFeatureExtractor, WhisperTokenizer, WhisperProcessor, WhisperForConditionalGeneration, \
-    Seq2SeqTrainingArguments, Seq2SeqTrainer
+    Seq2SeqTrainingArguments, Seq2SeqTrainer, WhisperModel
 
 from DataCollator import DataCollatorEmergencyCalls
 from EmergencyCallsDataset import EmergencyCallsDataset
@@ -37,26 +40,18 @@ tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-large", language="G
 # Combine extractor and tokenizer
 processor = WhisperProcessor.from_pretrained("openai/whisper-large", language="German", task="transcribe")
 
-# Check if feature extractor and tokenizer work as expected
-# _, input_str, _ = emergency_calls[0]
-# labels = tokenizer(input_str).input_ids
-# decoded_with_special = tokenizer.decode(labels, skip_special_tokens=False)
-# decoded_str = tokenizer.decode(labels, skip_special_tokens=True)
-#
-# print(f"Input:                 {input_str}")
-# print(f"Decoded w/ special:    {decoded_with_special}")
-# print(f"Decoded w/out special: {decoded_str}")
-# print(f"Are equal:             {input_str == decoded_str}")
-
-
-# def prepare_dataset(batch):
-#     signal, transcript, sampling_rate = batch["audio"]
-#     batch["input_features"] = feature_extractor(signal, sampling_rate=sampling_rate).input_features[0]
-#     batch["labels"] = tokenizer(batch["sentence"]).input_ids
-#
-#
-# emergency_calls = emergency_calls.map(prepare_dataset, num_proc=1)
 data_collator = DataCollatorEmergencyCalls(processor=processor)
+
+train_dataloader = DataLoader(EmergencyCallsDataset(), shuffle=True, batch_size=16, collate_fn=data_collator)
+eval_dataloader = DataLoader(EmergencyCallsValidationDataset(), batch_size=16, collate_fn=data_collator)
+
+for batch in train_dataloader:
+    print({k: v.shape for k, v in batch.items()})
+    break
+
+model = whisper.load_model(model_path)
+outputs = model(**batch)
+
 metric = evaluate.load("wer")
 model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large")
 model.config.forced_decoder_ids = None

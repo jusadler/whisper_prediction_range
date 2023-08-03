@@ -12,8 +12,8 @@ def main():
     model_size = "large"
     prompt = ""
     os.chdir("E:/Modelle/training_test/try_new_save/")
-    # model = whisper.load_model("E:/Modelle/training_test/try_new_save/save_dict/state_dict.pth")
-    model = torch.load("E:/Modelle/training_test/try_new_save/model.pth")
+    model = whisper.load_model("large")
+    # model = torch.load("E:/Modelle/training_test/try_new_save/model.pth")
     print("Model Load Complete")
     for i in range(0, 500):
         start = time.time()

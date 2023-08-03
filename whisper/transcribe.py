@@ -16,7 +16,7 @@ from .audio import (
     log_mel_spectrogram,
     pad_or_trim,
 )
-from .decoding import DecodingOptions, DecodingResult
+from .decoding import DecodingOptions, DecodingResult, decode
 from .timing import add_word_timestamps
 from .tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
 from .utils import (
@@ -144,7 +144,7 @@ def transcribe(
 
     language: str = decode_options["language"]
     task: str = decode_options.get("task", "transcribe")
-    tokenizer = get_tokenizer(model.is_multilingual, language=language, task=task)
+    tokenizer = get_tokenizer(True, language=language, task=task)
 
     if word_timestamps and task == "translate":
         warnings.warn("Word-level timestamps on translations may not be reliable.")
@@ -166,7 +166,8 @@ def transcribe(
                 kwargs.pop("best_of", None)
 
             options = DecodingOptions(**kwargs, temperature=t)
-            decode_result = model.decode(segment, options)
+            # decode_result = model.decode(segment, options)
+            decode_result = decode(model=model, mel=segment, options=options)
 
             needs_fallback = False
             if (
@@ -190,9 +191,10 @@ def transcribe(
         return decode_result
 
     seek = 0
-    input_stride = exact_div(
-        N_FRAMES, model.dims.n_audio_ctx
-    )  # mel frames per output token: 2
+    input_stride = 2
+    # input_stride = exact_div(
+    #     N_FRAMES, model.dims.n_audio_ctx
+    # )  # mel frames per output token: 2
     time_precision = (
         input_stride * HOP_LENGTH / SAMPLE_RATE
     )  # time per output token: 0.02 (seconds)

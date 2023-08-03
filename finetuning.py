@@ -2,8 +2,10 @@
 
 import evaluate
 import torch
+
+import whisper
 from transformers import WhisperFeatureExtractor, WhisperTokenizer, WhisperProcessor, WhisperForConditionalGeneration, \
-    Seq2SeqTrainingArguments, Seq2SeqTrainer
+    Seq2SeqTrainingArguments, Seq2SeqTrainer, WhisperModel
 
 from DataCollator import DataCollatorEmergencyCalls
 from EmergencyCallsDataset import EmergencyCallsDataset
@@ -58,19 +60,21 @@ processor = WhisperProcessor.from_pretrained("openai/whisper-large", language="G
 # emergency_calls = emergency_calls.map(prepare_dataset, num_proc=1)
 data_collator = DataCollatorEmergencyCalls(processor=processor)
 metric = evaluate.load("wer")
-model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large")
-model.config.forced_decoder_ids = None
-model.config.suppress_tokens = []
+# model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large")
+# model = WhisperModel.from_pretrained("openai/whisper-large")
+model = whisper.load_model("E:/Modelle/large-v2.pt")
+#model.config.forced_decoder_ids = None
+#model.config.suppress_tokens = []
 training_args = Seq2SeqTrainingArguments(
-    output_dir="E:/Modelle/training_test/try_large_run",  # change to a repo name of your choice
+    output_dir="E:/Modelle/training_test/try_whispermodel",  # change to a repo name of your choice
     per_device_train_batch_size=16,  # TODO BACK TO 16!!
     # per_device_train_batch_size=1,
     gradient_accumulation_steps=1,  # increase by 2x for every 2x decrease in batch size
     learning_rate=1e-5,
     # warmup_steps=125,  # back to 500
     # max_steps=1000,  # back to 4000
-    num_train_epochs=1,
-    gradient_checkpointing=True,
+    num_train_epochs=0.25,
+    gradient_checkpointing=False,  # was True
     fp16=True,
     evaluation_strategy="steps",
     per_device_eval_batch_size=8,
