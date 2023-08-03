@@ -1,11 +1,13 @@
 # Based on https://huggingface.co/blog/fine-tune-whisper
 
 import evaluate
+import torch
 from transformers import WhisperFeatureExtractor, WhisperTokenizer, WhisperProcessor, WhisperForConditionalGeneration, \
     Seq2SeqTrainingArguments, Seq2SeqTrainer
 
 from DataCollator import DataCollatorEmergencyCalls
 from EmergencyCallsDataset import EmergencyCallsDataset
+from EmergencyCallsValidationDataset import EmergencyCallsValidationDataset
 
 
 def compute_metrics(pred):
@@ -60,36 +62,42 @@ model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large")
 model.config.forced_decoder_ids = None
 model.config.suppress_tokens = []
 training_args = Seq2SeqTrainingArguments(
-    output_dir="E:/Modelle/training_test",  # change to a repo name of your choice
-    # per_device_train_batch_size=16, TODO BACK TO 16!!
-    per_device_train_batch_size=1,
+    output_dir="E:/Modelle/training_test/try_large_run",  # change to a repo name of your choice
+    per_device_train_batch_size=16,  # TODO BACK TO 16!!
+    # per_device_train_batch_size=1,
     gradient_accumulation_steps=1,  # increase by 2x for every 2x decrease in batch size
     learning_rate=1e-5,
-    warmup_steps=500,
-    max_steps=4000,
+    # warmup_steps=125,  # back to 500
+    # max_steps=1000,  # back to 4000
+    num_train_epochs=1,
     gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps",
     per_device_eval_batch_size=8,
     predict_with_generate=True,
     generation_max_length=225,
-    save_steps=1000,
-    eval_steps=1000,
-    logging_steps=25,
+    save_steps=500,
+    eval_steps=250,
+    logging_steps=250,
     report_to=["tensorboard"],
     load_best_model_at_end=True,
     metric_for_best_model="wer",
     greater_is_better=False,
-    push_to_hub=False,
+    push_to_hub=False
 )
 
 trainer = Seq2SeqTrainer(
     args=training_args,
     model=model,
     train_dataset=EmergencyCallsDataset(),
+    eval_dataset=EmergencyCallsValidationDataset(),
     data_collator=data_collator,
     compute_metrics=compute_metrics,
     tokenizer=processor.feature_extractor,
 )
 
 trainer.train()
+
+trainer.save_model("E:/Modelle/training_test/try_new_save")
+torch.save(trainer.model.state_dict(), "E:/Modelle/training_test/try_new_save/save_dict/state_dict.pth")
+torch.save(trainer.model, "E:/Modelle/training_test/try_new_save/model.pth")

@@ -34,4 +34,20 @@ class DataCollatorEmergencyCalls:
 
         batch["labels"] = labels
 
+        # # get the tokenized label sequences
+        # # label_features = [{"input_ids": dataset_list[i][1]} for i in range(len(dataset))]
+        # prompt_features = [{"input_ids": self.processor.tokenizer(input_case[2]).input_ids} for input_case in features]
+        # # pad the labels to max length
+        # prompts_batch = self.processor.tokenizer.pad(prompt_features, return_tensors="pt")
+        #
+        # # replace padding with -100 to ignore loss correctly
+        # prompts = prompts_batch["input_ids"].masked_fill(prompts_batch.attention_mask.ne(1), -100)
+        #
+        # # if bos token is appended in previous tokenization step,
+        # # cut bos token here as it's appended later anyways
+        # if (prompts[:, 0] == self.processor.tokenizer.bos_token_id).all().cpu().item():
+        #     prompts = prompts[:, 1:]
+        #
+        # batch["prompts"] = prompts
+
         return batch

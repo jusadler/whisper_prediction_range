@@ -47,6 +47,7 @@ def transcribe(
     word_timestamps: bool = False,
     prepend_punctuations: str = "\"'“¿([{-",
     append_punctuations: str = "\"'.。,，!！?？:：”)]}、",
+    border: int = 0,
     **decode_options,
 ):
     """
@@ -98,6 +99,10 @@ def transcribe(
         "prompt-engineer" a context for transcription, e.g. custom vocabularies or proper nouns
         to make it more likely to predict those word correctly.
 
+    border: int
+        Add Border to prediction, as it seems like the performance decreases toward the borders of the
+        30-second prediction frames
+
     decode_options: dict
         Keyword arguments to construct `DecodingOptions` instances
 
@@ -118,7 +123,7 @@ def transcribe(
         decode_options["fp16"] = False
 
     # Pad 30-seconds of silence to the input audio, for slicing
-    mel = log_mel_spectrogram(audio, padding=N_SAMPLES)
+    mel = log_mel_spectrogram(audio, padding=N_SAMPLES, left_padding=SAMPLE_RATE*border)
     content_frames = mel.shape[-1] - N_FRAMES
 
     if decode_options.get("language", None) is None:

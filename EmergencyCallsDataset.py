@@ -1,5 +1,6 @@
 from torch.utils.data import Dataset
 import pandas as pd
+import numpy as np
 import torchaudio
 
 from whisper import log_mel_spectrogram
@@ -12,7 +13,7 @@ from whisper.audio import N_SAMPLES
 class EmergencyCallsDataset(Dataset):
 
     def __init__(self):
-        self.annotations = pd.read_csv("D:/Notrufe/metadata.csv", index_col=0)
+        self.annotations = pd.read_csv("E:/Notrufe/metadata_split.csv", index_col=0)
 
     def __len__(self):
         return len(self.annotations)
@@ -20,8 +21,14 @@ class EmergencyCallsDataset(Dataset):
     def __getitem__(self, index):
         audio_sample_path = self.annotations.iloc[index, 0]
         transcription = self.annotations.iloc[index, 1]
+        # prompt = self.annotations.iloc[index, 2]
+        # if not isinstance(prompt, str):
+        #     prompt = ""
         # signal, _ = torchaudio.load(audio_sample_path)
+        if not isinstance(transcription, str):
+            transcription = ""
         signal = log_mel_spectrogram(audio_sample_path)
+        # return signal, transcription, prompt
         return signal, transcription
 
     def __getitems__(self, indices):
