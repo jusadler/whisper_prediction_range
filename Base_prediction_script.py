@@ -9,20 +9,23 @@ import torch
 
 
 def main():
-    model_size = "large"
+    model_size = "small"
+    model_name = "model_checkpoint_20230810_124515_4"
     prompt = ""
-    os.chdir("E:/Modelle/training_test/try_new_save/")
-    model = whisper.load_model("large")
-    # model = torch.load("E:/Modelle/training_test/try_new_save/model.pth")
+    os.chdir("E:/Modelle/training_test/v2_test_1")
+    model = whisper.load_model(f"{model_name}.pt", local_model=True)
+    # model = torch.load(f"{model}.pt")
+    model.eval()
     print("Model Load Complete")
-    for i in range(0, 500):
+    os.chdir("E:/Modelle/training_test/v2_test_1/Predictions")
+    for i in range(0, 100):
         start = time.time()
         file = f"E:/Notrufe/X_Data/{i}.wav"
-        result = model.transcribe(file, border=0)
+        result = model.transcribe(file, language="de")
         end = time.time()
         print(f"Computing time case {i}: {end - start} seconds")
         try:
-            with open(f"Predictions/{i}_{model_size}_first_test_run.txt", "w") as text_file:
+            with open(f"{i}_{model_size}_{model_name}.txt", "w") as text_file:
                 text_file.write(result["text"])
         except Exception as e:
             print(e)

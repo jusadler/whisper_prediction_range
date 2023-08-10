@@ -43,7 +43,7 @@ class Linear(nn.Linear):
 
 class Conv1d(nn.Conv1d):
     def _conv_forward(
-        self, x: Tensor, weight: Tensor, bias: Optional[Tensor]
+            self, x: Tensor, weight: Tensor, bias: Optional[Tensor]
     ) -> Tensor:
         return super()._conv_forward(
             x, weight.to(x.dtype), None if bias is None else bias.to(x.dtype)
@@ -69,11 +69,11 @@ class MultiHeadAttention(nn.Module):
         self.out = Linear(n_state, n_state)
 
     def forward(
-        self,
-        x: Tensor,
-        xa: Optional[Tensor] = None,
-        mask: Optional[Tensor] = None,
-        kv_cache: Optional[dict] = None,
+            self,
+            x: Tensor,
+            xa: Optional[Tensor] = None,
+            mask: Optional[Tensor] = None,
+            kv_cache: Optional[dict] = None,
     ):
         q = self.query(x)
 
@@ -91,7 +91,7 @@ class MultiHeadAttention(nn.Module):
         return self.out(wv), qk
 
     def qkv_attention(
-        self, q: Tensor, k: Tensor, v: Tensor, mask: Optional[Tensor] = None
+            self, q: Tensor, k: Tensor, v: Tensor, mask: Optional[Tensor] = None
     ):
         n_batch, n_ctx, n_state = q.shape
         scale = (n_state // self.n_head) ** -0.25
@@ -127,11 +127,11 @@ class ResidualAttentionBlock(nn.Module):
         self.mlp_ln = LayerNorm(n_state)
 
     def forward(
-        self,
-        x: Tensor,
-        xa: Optional[Tensor] = None,
-        mask: Optional[Tensor] = None,
-        kv_cache: Optional[dict] = None,
+            self,
+            x: Tensor,
+            xa: Optional[Tensor] = None,
+            mask: Optional[Tensor] = None,
+            kv_cache: Optional[dict] = None,
     ):
         x = x + self.attn(self.attn_ln(x), mask=mask, kv_cache=kv_cache)[0]
         if self.cross_attn:
@@ -142,7 +142,7 @@ class ResidualAttentionBlock(nn.Module):
 
 class AudioEncoder(nn.Module):
     def __init__(
-        self, n_mels: int, n_ctx: int, n_state: int, n_head: int, n_layer: int
+            self, n_mels: int, n_ctx: int, n_state: int, n_head: int, n_layer: int
     ):
         super().__init__()
         self.conv1 = Conv1d(n_mels, n_state, kernel_size=3, padding=1)
@@ -175,7 +175,7 @@ class AudioEncoder(nn.Module):
 
 class TextDecoder(nn.Module):
     def __init__(
-        self, n_vocab: int, n_ctx: int, n_state: int, n_head: int, n_layer: int
+            self, n_vocab: int, n_ctx: int, n_state: int, n_head: int, n_layer: int
     ):
         super().__init__()
 
@@ -202,8 +202,8 @@ class TextDecoder(nn.Module):
         """
         offset = next(iter(kv_cache.values())).shape[1] if kv_cache else 0
         x = (
-            self.token_embedding(x)
-            + self.positional_embedding[offset : offset + x.shape[-1]]
+                self.token_embedding(x)
+                + self.positional_embedding[offset: offset + x.shape[-1]]
         )
         x = x.to(xa.dtype)
 
@@ -212,7 +212,7 @@ class TextDecoder(nn.Module):
 
         x = self.ln(x)
         logits = (
-            x @ torch.transpose(self.token_embedding.weight.to(x.dtype), 0, 1)
+                x @ torch.transpose(self.token_embedding.weight.to(x.dtype), 0, 1)
         ).float()
 
         return logits
@@ -240,7 +240,7 @@ class Whisper(nn.Module):
         all_heads = torch.zeros(
             self.dims.n_text_layer, self.dims.n_text_head, dtype=torch.bool
         )
-        all_heads[self.dims.n_text_layer // 2 :] = True
+        all_heads[self.dims.n_text_layer // 2:] = True
         self.register_buffer("alignment_heads", all_heads.to_sparse(), persistent=False)
 
     def set_alignment_heads(self, dump: bytes):
@@ -259,7 +259,7 @@ class Whisper(nn.Module):
         return self.decoder(tokens, audio_features)
 
     def forward(
-        self, mel: torch.Tensor, tokens: torch.Tensor
+            self, mel: torch.Tensor, tokens: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
         return self.decoder(tokens, self.encoder(mel))
 

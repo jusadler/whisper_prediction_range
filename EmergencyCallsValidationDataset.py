@@ -1,8 +1,10 @@
 import numpy as np
+import torch
 from torch.utils.data import Dataset
 import pandas as pd
 import torchaudio
 
+import whisper.tokenizer
 from whisper import log_mel_spectrogram
 from whisper.audio import N_SAMPLES
 
@@ -14,13 +16,14 @@ class EmergencyCallsValidationDataset(Dataset):
 
     def __init__(self):
         self.annotations = pd.read_csv("E:/Notrufe/metadata_split_validation.csv", index_col=0)
+        self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True, language="de", task="transcription")
 
     def __len__(self):
         return len(self.annotations)
 
     def __getitem__(self, index):
         audio_sample_path = self.annotations.iloc[index, 0]
-        transcription = self.annotations.iloc[index, 1]
+        transcription = torch.tensor(self.tokenizer.encode(self.annotations.iloc[index, 1]))
         # prompt = self.annotations.iloc[index, 2]
         # if np.isnan(prompt):
         #     prompt = ""
@@ -38,7 +41,7 @@ class EmergencyCallsValidationDataset(Dataset):
 
 if __name__ == "__main__":
 
-    emergency_call_dataset = EmergencyCallsDataset()
+    emergency_call_dataset = EmergencyCallsValidationDataset()
 
     print(f"There are {len(emergency_call_dataset)} samples in the dataset")
 

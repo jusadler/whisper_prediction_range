@@ -191,10 +191,9 @@ def transcribe(
         return decode_result
 
     seek = 0
-    input_stride = 2
-    # input_stride = exact_div(
-    #     N_FRAMES, model.dims.n_audio_ctx
-    # )  # mel frames per output token: 2
+    input_stride = exact_div(
+        N_FRAMES, model.dims.n_audio_ctx
+    )  # mel frames per output token: 2
     time_precision = (
         input_stride * HOP_LENGTH / SAMPLE_RATE
     )  # time per output token: 0.02 (seconds)

@@ -3,8 +3,8 @@ from os.path import exists
 import pandas as pd
 import os
 
-os.chdir("D:/Notrufe/y_data/")
-for i in range(125):
+os.chdir("E:/Notrufe/y_data/")
+for i in range(250):
     if exists(f'{i}.txt'):
         y_df = pd.read_csv(f"{i}_large_timestamps.csv")
         prompt_list = [""]

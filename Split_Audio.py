@@ -5,10 +5,12 @@ import os
 
 import pandas as pd
 
-y_path = "D:/Notrufe/y_data/"
-os.chdir("D:/Notrufe/X_data_split/")
+directory = "E"
 
-for case in range(125):
+y_path = f"{directory}:/Notrufe/y_data/"
+os.chdir(f"{directory}:/Notrufe/X_data_split/")
+
+for case in range(250):
     if os.path.exists(f"{y_path}{case}_timestamps.csv"):
         case_df = pd.read_csv(f"{y_path}{case}_timestamps.csv")
         # sound_file = pydub.AudioSegment.from_wav(f"{case}.wav")
@@ -21,18 +23,18 @@ for case in range(125):
             # song = pydub.AudioSegment(new_file.tobytes(), frame_rate=sound_file.frame_rate,
             #                           sample_width=sound_file.sample_width, channels=1)
             # song.export(f"{case}_{count}.wav", format="wav")
-            if os.path.exists(f"D:/Notrufe/X_data_split/{case}_{count}.wav"):
-                os.remove(f"D:/Notrufe/X_data_split/{case}_{count}.wav")
-            if os.path.exists(f"D:/Notrufe/X_data_split/{case}_{count}_unpadded.wav"):
-                os.remove(f"D:/Notrufe/X_data_split/{case}_{count}_unpadded.wav")
+            if os.path.exists(f"{directory}:/Notrufe/X_data_split/{case}_{count}.wav"):
+                os.remove(f"{directory}:/Notrufe/X_data_split/{case}_{count}.wav")
+            if os.path.exists(f"{directory}:/Notrufe/X_data_split/{case}_{count}_unpadded.wav"):
+                os.remove(f"{directory}:/Notrufe/X_data_split/{case}_{count}_unpadded.wav")
             start = round(split[0] / 100, 2)
             end = round(split[1] / 100, 2)
             os.system(
-                f"ffmpeg -i D:/Notrufe/X_data_split/{case}.wav -ss {start} -to {end} D:/Notrufe/X_data_split/{case}_{count}_unpadded.wav")
+                f"ffmpeg -i {directory}:/Notrufe/X_data_split/{case}.wav -ss {start} -to {end} {directory}:/Notrufe/X_data_split/{case}_{count}_unpadded.wav")
             # if end-start < 30:
             # os.system(f'ffmpeg -i D:/Notrufe/X_data_split/{case}_{count}_unpadded.wav -af "apad=pad_dur={30+start-end}" D:/Notrufe/X_data_split/{case}_{count}.wav')
             os.system(
-                f'ffmpeg -i D:/Notrufe/X_data_split/{case}_{count}_unpadded.wav -af "apad=whole_dur=30" D:/Notrufe/X_data_split/{case}_{count}.wav')
+                f'ffmpeg -i {directory}:/Notrufe/X_data_split/{case}_{count}_unpadded.wav -af "apad=whole_dur=30" {directory}:/Notrufe/X_data_split/{case}_{count}.wav')
 
             # else:
             #    os.system(f"cp D:/Notrufe/X_data_split/{case}_{count}_unpadded.wav D:/Notrufe/X_data_split/{case}_{count}.wav")
