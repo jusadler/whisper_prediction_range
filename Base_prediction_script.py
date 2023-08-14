@@ -10,7 +10,7 @@ import torch
 
 def main():
     model_size = "small"
-    model_name = "model_checkpoint_20230810_124515_4"
+    model_name = "model_checkpoint_20230811_113629_4"
     prompt = ""
     os.chdir("E:/Modelle/training_test/v2_test_1")
     model = whisper.load_model(f"{model_name}.pt", local_model=True)

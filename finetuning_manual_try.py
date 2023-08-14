@@ -3,6 +3,7 @@
 import datetime
 import os
 
+import jiwer
 # import evaluate
 import torch
 from tensorboardX import SummaryWriter
@@ -60,7 +61,9 @@ tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True, language="de", ta
 
 train_dataloader = DataLoader(EmergencyCallsDataset(), shuffle=True, batch_size=1)  # , collate_fn=data_collator)
 # pin_memory=True)
-eval_dataloader = DataLoader(EmergencyCallsValidationDataset(), batch_size=1)  # collate_fn=data_collator)
+eval_dataloader = DataLoader(EmergencyCallsValidationDataset("E:/Notrufe/metadata_split_validation.csv"), batch_size=1)
+eval_full_dataloader = DataLoader(EmergencyCallsValidationDataset("E:/Notrufe/metadata_validation.csv", path_only=True), batch_size=1)
+# collate_fn=data_collator)
 # pin_memory=True)  # add num workers?
 
 # for batch in train_dataloader:
@@ -77,15 +80,19 @@ loss_fn = CrossEntropyLoss()  # WerLoss
 
 # metric = evaluate.load("wer")
 model.to(torch.cuda.current_device())
+
+
 def print_net_parameters(net):
     for name, para in net.named_parameters():
-        print("-"*20)
+        print("-" * 20)
         print(f"name: {name}")
         print("values: ")
         print(para.requires_grad)
+
+
 print_net_parameters(model)
 for name, param in model.named_parameters():
-    if param.requires_grad and not 'decoder.blocks.11' in name:
+    if param.requires_grad and not 'decoder.blocks.11.mlp' in name:  # Try only using MLP of 11
         param.requires_grad = False
 print_net_parameters(model)
 non_frozen_parameters = [p for p in model.parameters() if p.requires_grad]
@@ -153,80 +160,45 @@ for epoch in range(EPOCHS):
     avg_loss = train_one_epoch(epoch, writer)
     model.train(False)
 
-    # running_vloss = 0.0
-    # for i, vdata in enumerate(eval_dataloader):
-    #     vinputs, vlabels, _ = vdata
-    #     voutputs = model(vinputs, vlabels)
-    #     vloss = loss_fn(voutputs, vlabels)
-    #     running_vloss += vloss
-    #
-    # avg_vloss = running_vloss / (i + 1)
-    # print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
-    #
+    running_vloss = 0.0
+    for i, vdata in enumerate(eval_dataloader):
+        vinputs, vlabels = vdata
+        voutputs = model(vinputs, vlabels)
+        # vloss = loss_fn(voutputs, vlabels)
+        vloss = loss_fn(voutputs.view(-1, model.dims.n_vocab), vlabels.reshape(-1))
+        running_vloss += vloss
+
+    avg_vloss = running_vloss / (i + 1)
+    print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
+
+    vpreds = []
+    ground_truth = []
+    for vdata_full in eval_full_dataloader:
+        vinputs_full, vlabels_full = vdata_full
+        vpreds.append(model.transcribe(vinputs_full[0]))
+        ground_truth.append(vlabels_full)
+
+    print("Word Error Rate on Validation Data:")
+    print(jiwer.wer(ground_truth, vpreds))
+
     # writer.add_scalar('Training vs. Validation Loss',
     #                   {'Training': avg_loss, 'Validation': avg_vloss},
     #                   epoch + 1)
     # writer.flush()
 
-    # if avg_vloss < best_vloss:
-    if True:
-        # best_vloss = avg_vloss
+    if avg_vloss < best_vloss:
+        best_vloss = avg_vloss
         # state_dict_path = 'E:/Modelle/training_test/v2_test_1/model_state_dict_{}_{}.pt'.format(timestamp, epoch)
         # torch.save(model.state_dict(), state_dict_path)
         # model_path = 'E:/Modelle/training_test/v2_test_1/model_{}_{}.pt'.format(timestamp, epoch)
         # torch.save(model, model_path)
         checkpoint_path = 'E:/Modelle/training_test/v2_test_1/model_checkpoint_{}_{}.pt'.format(timestamp,
-                                                                                                   epoch)
-        torch.save({
-            'epoch': epoch,
-            'model_size': model_size,
-            'model_state_dict': model.state_dict(),
-            # 'optimizer_state_dict': optimizer.state_dict(),
-            'loss': avg_loss,
-            'dims': model.dims
-        }, checkpoint_path)
-
-
-# model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large")
-# model.config.forced_decoder_ids = None
-# model.config.suppress_tokens = []
-# training_args = Seq2SeqTrainingArguments(
-#     output_dir="E:/Modelle/training_test/try_large_run",  # change to a repo name of your choice
-#     per_device_train_batch_size=16,  # TODO BACK TO 16!!
-#     # per_device_train_batch_size=1,
-#     gradient_accumulation_steps=1,  # increase by 2x for every 2x decrease in batch size
-#     learning_rate=1e-5,
-#     # warmup_steps=125,  # back to 500
-#     # max_steps=1000,  # back to 4000
-#     num_train_epochs=1,
-#     gradient_checkpointing=True,
-#     fp16=True,
-#     evaluation_strategy="steps",
-#     per_device_eval_batch_size=8,
-#     predict_with_generate=True,
-#     generation_max_length=225,
-#     save_steps=500,
-#     eval_steps=250,
-#     logging_steps=250,
-#     report_to=["tensorboard"],
-#     load_best_model_at_end=True,
-#     metric_for_best_model="wer",
-#     greater_is_better=False,
-#     push_to_hub=False
-# )
-#
-# trainer = Seq2SeqTrainer(
-#     args=training_args,
-#     model=model,
-#     train_dataset=EmergencyCallsDataset(),
-#     eval_dataset=EmergencyCallsValidationDataset(),
-#     data_collator=data_collator,
-#     compute_metrics=compute_metrics,
-#     tokenizer=processor.feature_extractor,
-# )
-#
-# trainer.train()
-
-# trainer.save_model("E:/Modelle/training_test/try_new_save")
-# torch.save(trainer.model.state_dict(), "E:/Modelle/training_test/try_new_save/save_dict/state_dict.pth")
-# torch.save(trainer.model, "E:/Modelle/training_test/try_new_save/model.pth")
+                                                                                                epoch)
+        # torch.save({
+        #     'epoch': epoch,
+        #     'model_size': model_size,
+        #     'model_state_dict': model.state_dict(),
+        #     # 'optimizer_state_dict': optimizer.state_dict(),
+        #     'loss': avg_loss,
+        #     'dims': model.dims
+        # }, checkpoint_path)
