@@ -28,17 +28,18 @@ def compute_metrics(pred):
     # return {"wer": wer}
 
 
-emergency_calls = EmergencyCallsDataset()
+emergency_calls = EmergencyCallsDataset(transcript_as_str=True)
 
 model_path = "E:/Modelle/large-v2.pt"  # ("E:\Modelle\large-v2.pt" "C:\\Users\\Admin\\.cache\\whisper\\large-v2.pt
+model_size = "tiny"
 # Load Feature extractor
-feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-large")
+feature_extractor = WhisperFeatureExtractor.from_pretrained(f"openai/whisper-{model_size}")
 
 # Load Tokenizer
-tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-large", language="German", task="transcribe")
+tokenizer = WhisperTokenizer.from_pretrained(f"openai/whisper-{model_size}", language="German", task="transcribe")
 
 # Combine extractor and tokenizer
-processor = WhisperProcessor.from_pretrained("openai/whisper-large", language="German", task="transcribe")
+processor = WhisperProcessor.from_pretrained(f"openai/whisper-{model_size}", language="German", task="transcribe")
 
 # Check if feature extractor and tokenizer work as expected
 # _, input_str, _ = emergency_calls[0]
@@ -61,7 +62,7 @@ processor = WhisperProcessor.from_pretrained("openai/whisper-large", language="G
 # emergency_calls = emergency_calls.map(prepare_dataset, num_proc=1)
 data_collator = DataCollatorEmergencyCalls(processor=processor)
 metric = evaluate.load("wer")
-model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large")
+model = WhisperForConditionalGeneration.from_pretrained(f"openai/whisper-{model_size}")
 # model = WhisperModel.from_pretrained("openai/whisper-large")
 # model = whisper.load_model("E:/Modelle/large-v2.pt")
 #model.config.forced_decoder_ids = None
@@ -94,8 +95,8 @@ training_args = Seq2SeqTrainingArguments(
 trainer = Seq2SeqTrainer(
     args=training_args,
     model=model,
-    train_dataset=EmergencyCallsDataset(),
-    eval_dataset=EmergencyCallsValidationDataset(),
+    train_dataset=EmergencyCallsDataset(transcript_as_str=True),
+    eval_dataset=EmergencyCallsValidationDataset("E:/Notrufe/metadata_split_validation.csv"),
     data_collator=data_collator,
     compute_metrics=compute_metrics,
     tokenizer=processor.feature_extractor,

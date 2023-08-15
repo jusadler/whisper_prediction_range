@@ -2,8 +2,12 @@
 # Based on https://www.youtube.com/watch?v=jF43_wj_DCQ
 import datetime
 import os
+import random
+from typing import List, Tuple
 
 import jiwer
+import numpy as np
+import pandas as pd
 # import evaluate
 import torch
 from tensorboardX import SummaryWriter
@@ -15,71 +19,51 @@ import whisper
 from EmergencyCallsDataset import EmergencyCallsDataset
 from EmergencyCallsValidationDataset import EmergencyCallsValidationDataset
 
+# Seeds
+random_seed = 42
+torch.manual_seed(random_seed)
+random.seed(random_seed)
+np.random.seed(random_seed)
+
 # Random Split for splitting dataset? https://www.youtube.com/watch?v=jF43_wj_DCQ
 # for decoder:
 decoding_options = {'language': 'de'}  # => Prompt can be added here as well!!!! TODO
 
-os.chdir("E:/Modelle/training_test/Manual")
+os.chdir("E:/Modelle/training_test/grid_search/")
 
 metric = WordErrorRate()
 
-model_size = "small"
+model_size_ = "tiny"
+
+number_of_layers = {
+    "tiny": 4,
+    "base": 6,
+    "small": 12,
+    "medium": 24,
+    "large": 32
+}
+
+# Grid
+learning_rates = [0.000001, 0.0000001, 0.00000005]
+optimizers = ["Adam", "AdamW", "SGD"]
+active_layers_conditions = [[f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp'], ['decoder.ln'],
+                            [f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp', 'decoder.ln']]
+epochs_list = [3]
+
+eval_full_dataloader = DataLoader(
+    EmergencyCallsValidationDataset("E:/Notrufe/metadata_validation.csv", path_only=True),
+    batch_size=1)
 
 
-class WerLoss(torch.nn.Module):
+def calculate_wer(model):
+    vpreds = []
+    ground_truth = []
+    for vdata_full in eval_full_dataloader:
+        vinputs_full, vlabels_full = vdata_full
+        vpreds.append(model.transcribe(vinputs_full[0]).get("text"))
+        ground_truth.append(vlabels_full[0])
 
-    def __int__(self):
-        super(WerLoss, self).__init__()
-
-    def forward(self, pred_ids, label_ids):
-        # replace -100 with the pad_token_id
-        label_ids[label_ids == -100] = tokenizer.pad_token_id
-
-        pred_str = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
-        label_str = tokenizer.batch_decode(label_ids, skip_special_tokens=True)
-
-        # wer = 100 * word_error_rate(pred_str, label_str)
-        metric.reset()
-        metric.update(pred_str, label_str)
-
-        # return wer
-        return metric.compute()
-
-
-# model_path = "E:/Modelle/large-v2.pt"  # ("E:\Modelle\large-v2.pt" "C:\\Users\\Admin\\.cache\\whisper\\large-v2.pt
-# Load Feature extractor
-# feature_extractor = WhisperFeatureExtractor.from_pretrained(f"openai/whisper-{model_size}")
-#
-# # Load Tokenizer
-# tokenizer = WhisperTokenizer.from_pretrained(f"openai/whisper-{model_size}", language="German", task="transcribe")
-tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True, language="de", task="transcribe")
-#
-# # Combine extractor and tokenizer
-# processor = WhisperProcessor.from_pretrained(f"openai/whisper-{model_size}", language="German", task="transcribe")
-#
-# data_collator = DataCollatorEmergencyCalls(processor=processor)
-
-train_dataloader = DataLoader(EmergencyCallsDataset(), shuffle=True, batch_size=1)  # , collate_fn=data_collator)
-# pin_memory=True)
-eval_dataloader = DataLoader(EmergencyCallsValidationDataset("E:/Notrufe/metadata_split_validation.csv"), batch_size=1)
-eval_full_dataloader = DataLoader(EmergencyCallsValidationDataset("E:/Notrufe/metadata_validation.csv", path_only=True), batch_size=1)
-# collate_fn=data_collator)
-# pin_memory=True)  # add num workers?
-
-# for batch in train_dataloader:
-#     print({k: v.shape for k, v in batch.items()})
-#     break
-
-model = whisper.load_model(model_size)
-# model = whisper.load_model(model_path)
-# outputs = model(**batch)
-# outputs = [model.transcribe(audio=tensor) for tensor in batch.data["input_features"]]
-
-loss_fn = CrossEntropyLoss()  # WerLoss
-# loss_fn = WerLoss()
-
-# metric = evaluate.load("wer")
-model.to(torch.cuda.current_device())
+    return jiwer.wer(ground_truth, vpreds)
 
 
 def print_net_parameters(net):
@@ -90,19 +74,11 @@ def print_net_parameters(net):
         print(para.requires_grad)
 
 
-print_net_parameters(model)
-for name, param in model.named_parameters():
-    if param.requires_grad and not 'decoder.blocks.11.mlp' in name:  # Try only using MLP of 11
-        param.requires_grad = False
-print_net_parameters(model)
-non_frozen_parameters = [p for p in model.parameters() if p.requires_grad]
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  # Try Grid Search and different optimizers
-optimizer = torch.optim.AdamW(non_frozen_parameters, lr=0.0000001)
-
-
-def train_one_epoch(epoch_index, tb_writer):
+def train_one_epoch(epoch_index, tb_writer, optimizer, train_dataloader, model, loss_fn) -> Tuple[float, List]:
     running_loss = 0.
     last_loss = 0.
+
+    performance_list = []
 
     for count, data in enumerate(train_dataloader):
         # inputs = data.get("input_features")
@@ -118,87 +94,119 @@ def train_one_epoch(epoch_index, tb_writer):
         loss.backward()
         optimizer.step()
         running_loss += loss.item()
-        if count % 100 == 99:
-            last_loss = running_loss / 100
+        if count % 200 == 199:
+            last_loss = running_loss / 200
             print('  batch {} loss: {}'.format(count + 1, last_loss))
-            tb_x = epoch_index * len(train_dataloader) + count + 1
-            tb_writer.add_scalar('Loss/train', last_loss, tb_x)
+            # tb_x = epoch_index * len(train_dataloader) + count + 1
+            # tb_writer.add_scalar('Loss/train', last_loss, tb_x)
             running_loss = 0
-            # if count % 100 == 99:
-            #     # state_dict_path = 'E:/Modelle/training_test/v2_test_1/model_state_dict_{}_{}_{}.pt'.format(timestamp,
-            #     #                                                                                            epoch,
-            #     #                                                                                            count + 1)
-            #     # torch.save(model.state_dict(), state_dict_path)
-            #     # model_path = 'E:/Modelle/training_test/v2_test_1/model_{}_{}_{}.pt'.format(timestamp, epoch, count + 1)
-            #     # torch.save(model, model_path)
-            #     checkpoint_path = 'E:/Modelle/training_test/v2_test_1/model_checkpoint_{}_{}_{}.pt'.format(timestamp,
-            #                                                                                                epoch,
-            #                                                                                                count + 1)
-            #     torch.save({
-            #         'epoch': epoch,
-            #         'Steps': count+1,
-            #         'model_size': model_size,
-            #         'model_state_dict': model.state_dict(),
-            #         # 'optimizer_state_dict': optimizer.state_dict(),
-            #         'loss': loss,
-            #         'dims': model.dims
-            #     }, checkpoint_path)
-    return last_loss
+            # wer = calculate_wer(model)
+            performance_list.append({
+                "epoch": epoch_index,
+                "step_in_epoch": count + 1,
+                # "wer": wer,
+                "train_loss": last_loss
+            })
+    return last_loss, performance_list
 
 
-timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-writer = SummaryWriter('runs/fashion_trainer_{}'.format(timestamp))
+def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, epochs: int = 5,
+                optimizer_name: str = "AdamW"):
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    writer = SummaryWriter('runs/fashion_trainer_{}'.format(timestamp))
+    performance_list = []
 
-EPOCHS = 5
+    # # Load Tokenizer
+    # tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True, language="de", task="transcribe")
 
-best_vloss = 1_000_000
+    train_dataloader = DataLoader(EmergencyCallsDataset(), shuffle=True, batch_size=1)  # , collate_fn=data_collator)
+    # pin_memory=True)
+    eval_dataloader = DataLoader(EmergencyCallsValidationDataset("E:/Notrufe/metadata_split_validation.csv"),
+                                 batch_size=1)
 
-for epoch in range(EPOCHS):
-    print('EPOCH {}'.format(epoch + 1))
+    model = whisper.load_model(model_size)
 
-    model.train(True)
-    avg_loss = train_one_epoch(epoch, writer)
-    model.train(False)
+    loss_fn = CrossEntropyLoss()
 
-    running_vloss = 0.0
-    for i, vdata in enumerate(eval_dataloader):
-        vinputs, vlabels = vdata
-        voutputs = model(vinputs, vlabels)
-        # vloss = loss_fn(voutputs, vlabels)
-        vloss = loss_fn(voutputs.view(-1, model.dims.n_vocab), vlabels.reshape(-1))
-        running_vloss += vloss
+    model.to(torch.cuda.current_device())
 
-    avg_vloss = running_vloss / (i + 1)
-    print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
-
-    vpreds = []
-    ground_truth = []
-    for vdata_full in eval_full_dataloader:
-        vinputs_full, vlabels_full = vdata_full
-        vpreds.append(model.transcribe(vinputs_full[0]))
-        ground_truth.append(vlabels_full)
+    # print_net_parameters(model)
+    for name, param in model.named_parameters():
+        # if param.requires_grad and not f'decoder.blocks.{number_of_layers.get(model_size) - 1}.mlp' in name:  # Try only using MLP of 11
+        if param.requires_grad and not any(layer_condition in name for layer_condition in layer_conditions):
+            param.requires_grad = False
+    # print_net_parameters(model)
+    non_frozen_parameters = [p for p in model.parameters() if p.requires_grad]
+    if optimizer_name == "Adam":
+        optimizer = torch.optim.Adam(non_frozen_parameters, lr=learning_rate)
+    elif optimizer_name == "SGD":
+        optimizer = torch.optim.SGD(non_frozen_parameters, lr=learning_rate)
+    else:
+        optimizer = torch.optim.AdamW(non_frozen_parameters, lr=learning_rate)  # 0.0000001
 
     print("Word Error Rate on Validation Data:")
-    print(jiwer.wer(ground_truth, vpreds))
+    best_wer = calculate_wer(model)
+    print(best_wer)
+    performance_list.append({
+        "epoch": 0,
+        "step_in_epoch": 0,
+        "wer": best_wer
+    })
 
-    # writer.add_scalar('Training vs. Validation Loss',
-    #                   {'Training': avg_loss, 'Validation': avg_vloss},
-    #                   epoch + 1)
-    # writer.flush()
+    for epoch in range(epochs):
+        print('EPOCH {}'.format(epoch + 1))
 
-    if avg_vloss < best_vloss:
-        best_vloss = avg_vloss
-        # state_dict_path = 'E:/Modelle/training_test/v2_test_1/model_state_dict_{}_{}.pt'.format(timestamp, epoch)
-        # torch.save(model.state_dict(), state_dict_path)
-        # model_path = 'E:/Modelle/training_test/v2_test_1/model_{}_{}.pt'.format(timestamp, epoch)
-        # torch.save(model, model_path)
-        checkpoint_path = 'E:/Modelle/training_test/v2_test_1/model_checkpoint_{}_{}.pt'.format(timestamp,
-                                                                                                epoch)
-        # torch.save({
-        #     'epoch': epoch,
-        #     'model_size': model_size,
-        #     'model_state_dict': model.state_dict(),
-        #     # 'optimizer_state_dict': optimizer.state_dict(),
-        #     'loss': avg_loss,
-        #     'dims': model.dims
-        # }, checkpoint_path)
+        model.train(True)
+        avg_loss, performance_list_epoch = train_one_epoch(epoch, writer, optimizer, train_dataloader, model, loss_fn)
+        model.train(False)
+        performance_list += performance_list_epoch
+
+        running_vloss = 0.0
+        for i, vdata in enumerate(eval_dataloader):
+            vinputs, vlabels = vdata
+            voutputs = model(vinputs, vlabels)
+            # vloss = loss_fn(voutputs, vlabels)
+            vloss = loss_fn(voutputs.view(-1, model.dims.n_vocab), vlabels.reshape(-1))
+            running_vloss += vloss
+
+        avg_vloss = running_vloss / (i + 1)
+        print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
+
+        print("Word Error Rate on Validation Data:")
+        avg_wer = calculate_wer(model)
+        print(avg_wer)
+        print(avg_wer < best_wer)
+        performance_list.append({
+            "epoch": epoch,
+            "wer": avg_wer,
+            "train_loss": avg_loss,
+            "validation_loss": avg_vloss
+        })
+
+        if avg_wer < best_wer or epoch == epochs - 1:
+            best_wer = avg_wer
+            checkpoint_path = 'model_checkpoint_{}_{}.pt'.format(timestamp, epoch)
+            torch.save({
+                'epoch': epoch,
+                'model_size': model_size,
+                'model_state_dict': model.state_dict(),
+                'loss': avg_loss,
+                'wer': avg_wer,
+                'dims': model.dims
+            }, checkpoint_path)
+
+    performance_path = f'model_performance_{timestamp}_{model_size}_{learning_rate}_{optimizer_name}_{epochs}.csv'
+    pd.DataFrame(performance_list, columns=["epoch", "wer", "train_loss", "validation_loss", "step_in_epoch"]).to_csv(
+        performance_path)
+
+
+for epoch_number in epochs_list:
+    for lr in learning_rates:
+        for active_layer_condition in active_layers_conditions:
+            for optimizer_type in optimizers:
+                print(f"Number of Epochs: {epoch_number}")
+                print(f"Learning Rate: {lr}")
+                print(f"Layer Conditions: {active_layer_condition}")
+                print(f"Optimizer: {optimizer_type}")
+                train_model(model_size_, active_layer_condition, learning_rate=lr, epochs=epoch_number,
+                            optimizer_name=optimizer_type)

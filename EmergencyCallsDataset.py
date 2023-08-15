@@ -14,9 +14,10 @@ from whisper.audio import N_SAMPLES
 
 class EmergencyCallsDataset(Dataset):
 
-    def __init__(self):
+    def __init__(self, transcript_as_str=False):
         self.annotations = pd.read_csv("E:/Notrufe/metadata_split.csv", index_col=0)
         self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True, language="de", task="transcribe")
+        self.transcript_as_str = transcript_as_str
 
     def __len__(self):
         return len(self.annotations)
@@ -30,7 +31,8 @@ class EmergencyCallsDataset(Dataset):
         # signal, _ = torchaudio.load(audio_sample_path)
         if not isinstance(transcription, str):
             transcription = ""
-        transcription = torch.tensor(self.tokenizer.encode(transcription)).to(0)
+        if not self.transcript_as_str:
+            transcription = torch.tensor(self.tokenizer.encode(transcription)).to(0)
         signal = log_mel_spectrogram(audio_sample_path).to(0)
         # return signal, transcription, transcription  # TODO CHANGE BACK TO PROMPT ON 3rd POSITION
         return signal, transcription

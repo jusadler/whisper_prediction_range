@@ -7,7 +7,7 @@ def create_metadata_file():
     split = False
     directory = "E"
     first_case = 201
-    last_case = 249  # TODO Regenerate
+    last_case = 215 # TODO Regenerate
     X_path = f"{directory}:/Notrufe/X_Data_Split/"
     y_path = f"{directory}:/Notrufe/y_data/"
     existing_ground_truth_cases = [i for i in range(first_case, last_case + 1) if exists(f'{y_path}{i}.txt')]
@@ -24,7 +24,7 @@ def create_metadata_file():
         for case in existing_ground_truth_cases:
             with open(f"{y_path}{case}.txt", "r") as text_file:
                 transcript = text_file.read().replace('\n', '')
-            metadata_list.append({'FilePath': f'{X_path}{case}.wav', 'Transcription': {transcript}})
+            metadata_list.append({'FilePath': f'{X_path}{case}.wav', 'Transcription': transcript})
         metadata_df = pd.DataFrame(metadata_list, columns=["FilePath", "Transcription"])
         metadata_df.to_csv(f'{directory}:/Notrufe/metadata_validation.csv')
 

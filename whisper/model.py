@@ -261,7 +261,9 @@ class Whisper(nn.Module):
     def forward(
             self, mel: torch.Tensor, tokens: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
-        return self.decoder(tokens, self.encoder(mel))
+        # TODO BACK TO ORIGINAL
+        encode_result = self.encoder(mel)
+        return self.decoder(tokens, encode_result)
 
     @property
     def device(self):

@@ -15,7 +15,7 @@ def main():
     os.chdir("D:/Notrufe/Pred_With_Timestamps/")
     model = whisper.load_model(model_size)
     print("Model Load Complete")
-    for i in range(93, 94):
+    for i in range(510, 511):
         start = time.time()
         file = f"D:/Notrufe/X_Data/{i}.wav"
         result = model.transcribe(file)
