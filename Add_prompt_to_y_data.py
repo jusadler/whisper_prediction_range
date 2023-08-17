@@ -4,7 +4,7 @@ import pandas as pd
 import os
 
 os.chdir("E:/Notrufe/y_data/")
-for i in range(250):
+for i in range(511):
     if exists(f'{i}.txt'):
         y_df = pd.read_csv(f"{i}_large_timestamps.csv")
         prompt_list = [""]

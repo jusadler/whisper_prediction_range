@@ -10,7 +10,7 @@ directory = "E"
 y_path = f"{directory}:/Notrufe/y_data/"
 os.chdir(f"{directory}:/Notrufe/X_data_split/")
 
-for case in range(250):
+for case in range(511):
     if os.path.exists(f"{y_path}{case}_timestamps.csv"):
         case_df = pd.read_csv(f"{y_path}{case}_timestamps.csv")
         # sound_file = pydub.AudioSegment.from_wav(f"{case}.wav")
