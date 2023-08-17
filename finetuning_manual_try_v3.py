@@ -1,5 +1,7 @@
-# Based on https://huggingface.co/blog/fine-tune-whisper and https://huggingface.co/learn/nlp-course/chapter3/4?fw=pt
-# Based on https://www.youtube.com/watch?v=jF43_wj_DCQ
+# Based on https://www.youtube.com/watch?v=jF43_wj_DCQ,
+# https://colab.research.google.com/drive/1P4ClLkPmfsaKn2tBbRp0nVjGMRKR-EWz?usp=sharing#scrollTo=m-Wq6FQQAQ3u
+# link from https://github.com/openai/whisper/discussions/64,
+# https://pytorch.org/tutorials/beginner/introyt/trainingyt.html
 import datetime
 import os
 import random
@@ -43,21 +45,24 @@ number_of_layers = {
 }
 
 # Grid
-learning_rates = [0.000001, 0.0000001, 0.00000005]
-optimizers = ["Adam", "AdamW", "SGD"]
-active_layers_conditions = [[f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp'], ['decoder.ln'],
-                            [f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp', 'decoder.ln']]
-epochs_list = [3]
+# learning_rates = [0.000001, 0.0000001, 0.00000005]
+learning_rates = [0.0000002, 0.0000001, 0.00000005]
+# optimizers = ["Adam", "AdamW", "SGD"]
+optimizers = ["AdamW"]
+# active_layers_conditions = [[f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp'], ['decoder.ln'],
+active_layers_conditions = [f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp', 'decoder.ln']
+epochs_list = [10]
 
 
 class EmergencyCallsDatasetLocal(torch.utils.data.Dataset):
     # TODO NEED TO ADD PROMPT??!
-    def __init__(self, annotations_path, tokenizer) -> None:
+    def __init__(self, annotations_path, tokenizer, data_to_gpu=True) -> None:
         super().__init__()
 
         self.annotations = pd.read_csv(annotations_path, index_col=0)
         self.sample_rate = 16000
         self.tokenizer = tokenizer
+        self.data_to_gpu = data_to_gpu
 
     def __len__(self):
         return len(self.annotations)
@@ -69,7 +74,9 @@ class EmergencyCallsDatasetLocal(torch.utils.data.Dataset):
         prompt = annotation.iloc[2]
 
         # audio
-        mel = whisper.log_mel_spectrogram(audio_sample_path).to(0)
+        mel = whisper.log_mel_spectrogram(audio_sample_path)
+        if self.data_to_gpu:
+            mel.to(0)
 
         text = [*self.tokenizer.sot_sequence_including_notimestamps] + self.tokenizer.encode(transcription)
         labels = text[1:] + [self.tokenizer.eot]
@@ -88,7 +95,9 @@ class EmergencyCallsDatasetLocal(torch.utils.data.Dataset):
 
 
 class DataCollatorEmergencyCallsDataset:
-    # tokenizer: Any
+    def __init__(self, tensors_to_gpu=True):
+        super().__init__()
+        self.tensors_to_gpu = tensors_to_gpu
 
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]):
         input_ids, labels, dec_input_ids = [], [], []
@@ -96,9 +105,10 @@ class DataCollatorEmergencyCallsDataset:
             input_ids.append(f["input_ids"])
             labels.append(f["labels"])
             dec_input_ids.append(f["dec_input_ids"])
-
-        input_ids = torch.concat([input_id[None, :] for input_id in input_ids]).to(0)
-
+        if self.tensors_to_gpu:
+            input_ids = torch.concat([input_id[None, :] for input_id in input_ids]).to(0)
+        else:
+            input_ids = torch.concat([input_id[None, :] for input_id in input_ids])
         label_lengths = [len(lab) for lab in labels]
         dec_input_ids_length = [len(e) for e in dec_input_ids]
         max_label_len = max(label_lengths + dec_input_ids_length)
@@ -113,8 +123,12 @@ class DataCollatorEmergencyCallsDataset:
             "dec_input_ids": dec_input_ids
         }
 
-        batch = {k: torch.tensor(np.array(v), requires_grad=False).type(torch.LongTensor).to(0) for k, v in
-                 batch.items()}
+        if self.tensors_to_gpu:
+            batch = {k: torch.tensor(np.array(v), requires_grad=False).type(torch.LongTensor).to(0) for k, v in
+                     batch.items()}
+        else:
+            batch = {k: torch.tensor(np.array(v), requires_grad=False).type(torch.LongTensor) for k, v in
+                     batch.items()}
         batch["input_ids"] = input_ids
 
         return batch
@@ -140,17 +154,20 @@ class DataCollatorEmergencyCallsDataset:
 
 
 eval_full_dataloader = DataLoader(
-    EmergencyCallsValidationDataset("E:/Notrufe/metadata_validation.csv", path_only=True),
+    EmergencyCallsValidationDataset("E:/Notrufe/metadata_validation.csv", path_only=True, data_to_gpu=False),
     batch_size=1)
 
 
 def calculate_wer_and_cer(model):
     vpreds = []
     ground_truth = []
+    model.eval()
     for vdata_full in eval_full_dataloader:
         vinputs_full, vlabels_full = vdata_full
-        vpreds.append(model.transcribe(vinputs_full[0]).get("text"))
-        ground_truth.append(vlabels_full[0])
+        vinputs_full = vinputs_full[0]
+        vlabels_full = vlabels_full[0]
+        vpreds.append(model.transcribe(vinputs_full).get("text"))
+        ground_truth.append(vlabels_full)
 
     return jiwer.wer(ground_truth, vpreds), jiwer.cer(ground_truth, vpreds)
 
@@ -168,7 +185,7 @@ def train_one_epoch(epoch_index, tb_writer, optimizer, train_dataloader, model, 
     last_loss = 0.
 
     performance_list = []
-
+    model.train()
     for count, data in enumerate(train_dataloader):
         inputs = data.get("input_ids")
         labels = data.get('labels')
@@ -183,13 +200,16 @@ def train_one_epoch(epoch_index, tb_writer, optimizer, train_dataloader, model, 
         loss.backward()
         optimizer.step()
         running_loss += loss.item()
-        if count % 200 == 199:
-            last_loss = running_loss / 200
+        if count % 160 == 159:
+            model.eval()
+            last_loss = running_loss / 160
             print('  batch {} loss: {}'.format(count + 1, last_loss))
-            # tb_x = epoch_index * len(train_dataloader) + count + 1
-            # tb_writer.add_scalar('Loss/train', last_loss, tb_x)
             running_loss = 0
             wer, cer = calculate_wer_and_cer(model)
+            print("WER on validation data")
+            print(wer)
+            print("CER on validation data")
+            print(cer)
             performance_list.append({
                 "epoch": epoch_index,
                 "step_in_epoch": count + 1,
@@ -197,11 +217,13 @@ def train_one_epoch(epoch_index, tb_writer, optimizer, train_dataloader, model, 
                 "cer": cer,
                 "train_loss": last_loss
             })
+            model.train()
     return last_loss, performance_list
 
 
 def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, epochs: int = 5,
                 optimizer_name: str = "AdamW"):
+    batch_size = 4
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     writer = SummaryWriter('runs/fashion_trainer_{}'.format(timestamp))
     performance_list = []
@@ -212,10 +234,10 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
     # train_dataloader = DataLoader(EmergencyCallsDataset(), shuffle=True, batch_size=4,
     #                               collate_fn=DataCollatorEmergencyCallsDataset())
     train_dataloader = DataLoader(EmergencyCallsDatasetLocal("E:/Notrufe/metadata_split.csv", tokenizer), shuffle=True,
-                                  batch_size=4, collate_fn=DataCollatorEmergencyCallsDataset())
+                                  batch_size=batch_size, collate_fn=DataCollatorEmergencyCallsDataset())
     # pin_memory=True)
     eval_dataloader = DataLoader(EmergencyCallsDatasetLocal("E:/Notrufe/metadata_split_validation.csv", tokenizer),
-                                 batch_size=4, collate_fn=DataCollatorEmergencyCallsDataset())
+                                 batch_size=1, collate_fn=DataCollatorEmergencyCallsDataset(tensors_to_gpu=False))
 
     model = whisper.load_model(model_size)
 
@@ -240,6 +262,8 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
     print("Word Error Rate on Validation Data:")
     best_wer, best_cer = calculate_wer_and_cer(model)
     print(best_wer)
+    print("CER on validation data")
+    print(best_cer)
     performance_list.append({
         "epoch": 0,
         "step_in_epoch": 0,
@@ -253,17 +277,23 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
         model.train(True)
         avg_loss, performance_list_epoch = train_one_epoch(epoch, writer, optimizer, train_dataloader, model, loss_fn)
         model.train(False)
+        model.eval()
         performance_list += performance_list_epoch
 
         running_vloss = 0.0
-        for i, vdata in enumerate(eval_dataloader):
-            vinputs = vdata.get("input_ids")
-            vlabels = vdata.get('labels')
-            vdec_input_ids = vdata.get('dec_input_ids')
-            voutputs = model(vinputs, vdec_input_ids)
-            # vloss = loss_fn(voutputs, vlabels)
-            vloss = loss_fn(voutputs.view(-1, model.dims.n_vocab), vlabels.reshape(-1))
-            running_vloss += vloss
+        with torch.no_grad():
+            for i, vdata in enumerate(eval_dataloader):
+                vinputs = vdata.get("input_ids").to(0)
+                vlabels = vdata.get('labels').to(0)
+                vdec_input_ids = vdata.get('dec_input_ids').to(0)
+                voutputs = model(vinputs, vdec_input_ids)
+                # vloss = loss_fn(voutputs, vlabels)
+                vloss = loss_fn(voutputs.view(-1, model.dims.n_vocab), vlabels.reshape(-1))
+                running_vloss += vloss
+                vinputs.detach()
+                vlabels.detach()
+                vdec_input_ids.detach()
+                torch.cuda.empty_cache()
 
         avg_vloss = running_vloss / (i + 1)
         print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
@@ -271,6 +301,7 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
         print("Word Error Rate on Validation Data:")
         avg_wer, avg_cer = calculate_wer_and_cer(model)
         print(avg_wer)
+        print("CER on validation data")
         print(avg_cer)
         print(avg_wer < best_wer)
         performance_list.append({
@@ -294,7 +325,7 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
                 'dims': model.dims
             }, checkpoint_path)
 
-    performance_path = f'model_performance_{timestamp}_{model_size}_{learning_rate}_{optimizer_name}_{epochs}.csv'
+    performance_path = f'model_performance_{timestamp}_{model_size}_{learning_rate}_{optimizer_name}_{epochs}_{batch_size}.csv'
     pd.DataFrame(performance_list,
                  columns=["epoch", "wer", "cer", "train_loss", "validation_loss", "step_in_epoch"]).to_csv(
         performance_path)
@@ -304,6 +335,9 @@ for epoch_number in epochs_list:
     for lr in learning_rates:
         for active_layer_condition in active_layers_conditions:
             for optimizer_type in optimizers:
+                torch.manual_seed(random_seed)
+                random.seed(random_seed)
+                np.random.seed(random_seed)
                 print(f"Number of Epochs: {epoch_number}")
                 print(f"Learning Rate: {lr}")
                 print(f"Layer Conditions: {active_layer_condition}")

@@ -14,10 +14,11 @@ from whisper.audio import N_SAMPLES
 
 class EmergencyCallsValidationDataset(Dataset):
 
-    def __init__(self, annotations_path, path_only = False):
+    def __init__(self, annotations_path, path_only=False, data_to_gpu=True):
         self.annotations = pd.read_csv(annotations_path, index_col=0)
         self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True, language="de", task="transcription")
         self.path_only = path_only
+        self.data_to_gpu = data_to_gpu
 
     def __len__(self):
         return len(self.annotations)
@@ -26,12 +27,15 @@ class EmergencyCallsValidationDataset(Dataset):
         audio_sample_path = self.annotations.iloc[index, 0]
         if self.path_only:
             return audio_sample_path, self.annotations.iloc[index, 1]
-        transcription = torch.tensor(self.tokenizer.encode(self.annotations.iloc[index, 1])).to(0)
+        transcription = torch.tensor(self.tokenizer.encode(self.annotations.iloc[index, 1]))
         # prompt = self.annotations.iloc[index, 2]
         # if np.isnan(prompt):
         #     prompt = ""
         # signal, _ = torchaudio.load(audio_sample_path)
-        signal = log_mel_spectrogram(audio_sample_path).to(0)
+        signal = log_mel_spectrogram(audio_sample_path)
+        if self.data_to_gpu:
+            transcription.to(0)
+            signal.to(0)
         # return signal, transcription, prompt
         return signal, transcription
 
