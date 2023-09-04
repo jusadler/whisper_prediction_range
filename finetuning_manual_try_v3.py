@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 # import evaluate
 import torch
-from tensorboardX import SummaryWriter
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from torcheval.metrics import WordErrorRate
@@ -21,36 +20,40 @@ import whisper
 from EmergencyCallsValidationDataset import EmergencyCallsValidationDataset
 
 # Seeds
-random_seed = 42
-torch.manual_seed(random_seed)
-random.seed(random_seed)
-np.random.seed(random_seed)
+# random_seeds = [42, 16, 420, 314159]
+random_seeds = [42]
+torch.manual_seed(random_seeds[0])
+random.seed(random_seeds[0])
+np.random.seed(random_seeds[0])
 
 # Random Split for splitting dataset? https://www.youtube.com/watch?v=jF43_wj_DCQ
 # for decoder:
 decoding_options = {'language': 'de'}  # => Prompt can be added here as well!!!! TODO
-
-os.chdir("E:/Modelle/training_test/grid_search/")
+path = "E:/Modelle/Full Training/"
+os.chdir(path)
 
 metric = WordErrorRate()
 
-model_size_ = "tiny"
+model_sizes = ["medium", "large-v1"]  # ["large", "base", "small", "medium", "tiny"]
 
 number_of_layers = {
     "tiny": 4,
     "base": 6,
     "small": 12,
     "medium": 24,
-    "large": 32
+    "large": 32,
+    "large-v1": 32
 }
 
 # Grid
-# learning_rates = [0.000001, 0.0000001, 0.00000005]
-learning_rates = [0.0000002, 0.0000001, 0.00000005]
+learning_rates = [0.0001]  # [0.0001, 0.00001, 0.000001]  # [0.0005, 0.0001, 0.00005, 0.00001]
+scheduler_values = [[1, 0.8], [1, 0.7], [1, 0.6], [1, 0.5]]  # [[2, 0.9], [1, 0.9], [1, 0.8], [1, 1]]
+# TODO Try heavier decay (0.7 or lower) => Also for smaller models!!
 # optimizers = ["Adam", "AdamW", "SGD"]
 optimizers = ["AdamW"]
 # active_layers_conditions = [[f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp'], ['decoder.ln'],
-active_layers_conditions = [f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp', 'decoder.ln']
+#                             [f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp', 'decoder.ln']]
+batch_sizes = [16]
 epochs_list = [10]
 
 
@@ -132,44 +135,66 @@ class DataCollatorEmergencyCallsDataset:
         batch["input_ids"] = input_ids
 
         return batch
-        # input_features = torch.stack([input_case[0] for input_case in features])
-        # batch = self.processor.feature_extractor.pad(input_features, return_tensors="pt").to(0)
-        #
-        # label_features = [{"input_ids": input_case[1]} for input_case in features]
-        # # pad the labels to max length
-        # labels_batch = self.processor.tokenizer.pad(label_features, return_tensors="pt").to(0)
-        #
-        # # replace padding with -100 to ignore loss correctly
-        # labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
-        #
-        # # if bos token is appended in previous tokenization step,
-        # # cut bos token here as it's appended later anyways
-        # if (labels[:, 0] == self.processor.tokenizer.bos_token_id).all().cpu().item():
-        #     labels = labels[:, 1:]
-        #
-        # # TODO Try One-Hot Encoding
-        # batch["labels"] = labels
-        #
-        # return batch
 
+
+train_full_dataloader = DataLoader(
+    EmergencyCallsValidationDataset("E:/Notrufe/metadata.csv", path_only=True, data_to_gpu=False)
+)
 
 eval_full_dataloader = DataLoader(
     EmergencyCallsValidationDataset("E:/Notrufe/metadata_validation.csv", path_only=True, data_to_gpu=False),
     batch_size=1)
 
+test_full_dataloader = DataLoader(
+    EmergencyCallsValidationDataset("E:/Notrufe/metadata_test.csv", path_only=True, data_to_gpu=False),
+    batch_size=1)
 
-def calculate_wer_and_cer(model):
-    vpreds = []
+
+def calculate_wer_and_cer(model, validation=True, test=True):
+    preds = []
     ground_truth = []
     model.eval()
-    for vdata_full in eval_full_dataloader:
-        vinputs_full, vlabels_full = vdata_full
-        vinputs_full = vinputs_full[0]
-        vlabels_full = vlabels_full[0]
-        vpreds.append(model.transcribe(vinputs_full).get("text"))
-        ground_truth.append(vlabels_full)
+    if validation:
+        for vdata_full in eval_full_dataloader:
+            vinputs_full, vlabels_full = vdata_full
+            vinputs_full = vinputs_full[0]
+            vlabels_full = vlabels_full[0]
+            preds.append(model.transcribe(vinputs_full).get("text"))
+            ground_truth.append(vlabels_full)
+    elif test:
+        for tdata_full in test_full_dataloader:
+            tinputs_full, tlabels_full = tdata_full
+            tinputs_full = tinputs_full[0]
+            tlabels_full = tlabels_full[0]
+            preds.append(model.transcribe(tinputs_full).get("text"))
+            ground_truth.append(tlabels_full)
+    else:
+        for tdata_full in train_full_dataloader:
+            tinputs_full, tlabels_full = tdata_full
+            tinputs_full = tinputs_full[0]
+            tlabels_full = tlabels_full[0]
+            preds.append(model.transcribe(tinputs_full).get("text"))
+            ground_truth.append(tlabels_full)
 
-    return jiwer.wer(ground_truth, vpreds), jiwer.cer(ground_truth, vpreds)
+    return jiwer.wer(ground_truth, preds), jiwer.cer(ground_truth, preds)
+
+
+def calculate_vloss(model, eval_dataloader, loss_fn):
+    running_vloss = 0.0
+    with torch.no_grad():
+        for i, vdata in enumerate(eval_dataloader):
+            vinputs = vdata.get("input_ids").to(0)
+            vlabels = vdata.get('labels').to(0)
+            vdec_input_ids = vdata.get('dec_input_ids').to(0)
+            voutputs = model(vinputs, vdec_input_ids)
+            vloss = loss_fn(voutputs.view(-1, model.dims.n_vocab), vlabels.reshape(-1))
+            running_vloss += vloss
+            vinputs.detach()
+            vlabels.detach()
+            vdec_input_ids.detach()
+            torch.cuda.empty_cache()
+
+    return running_vloss / (i + 1)
 
 
 def print_net_parameters(net):
@@ -180,52 +205,49 @@ def print_net_parameters(net):
         print(para.requires_grad)
 
 
-def train_one_epoch(epoch_index, tb_writer, optimizer, train_dataloader, model, loss_fn) -> Tuple[float, List]:
+def train_one_epoch(epoch_index, optimizer, train_dataloader, model, loss_fn, scheduler) -> Tuple[float, List]:
     running_loss = 0.
-    last_loss = 0.
 
     performance_list = []
     model.train()
     for count, data in enumerate(train_dataloader):
         inputs = data.get("input_ids")
         labels = data.get('labels')
-        dec_input_ids = data.get('dec_input_ids')  # TODO Add prompts
-        # inputs = data[0]
-        # labels = data[1]
-        # prompts = data[1]
+        dec_input_ids = data.get('dec_input_ids')
         optimizer.zero_grad()
         outputs = model(inputs, dec_input_ids)
-        # loss = loss_fn(torch.argmax(outputs, dim=2), labels)
         loss = loss_fn(outputs.view(-1, model.dims.n_vocab), labels.reshape(-1))
         loss.backward()
         optimizer.step()
         running_loss += loss.item()
-        if count % 160 == 159:
-            model.eval()
-            last_loss = running_loss / 160
-            print('  batch {} loss: {}'.format(count + 1, last_loss))
-            running_loss = 0
-            wer, cer = calculate_wer_and_cer(model)
-            print("WER on validation data")
-            print(wer)
-            print("CER on validation data")
-            print(cer)
-            performance_list.append({
-                "epoch": epoch_index,
-                "step_in_epoch": count + 1,
-                "wer": wer,
-                "cer": cer,
-                "train_loss": last_loss
-            })
-            model.train()
+        # if count % test_interval == test_interval - 1:
+        #     model.eval()
+        #     last_loss = running_loss / test_interval
+        #     print('  batch {} loss: {}'.format(count + 1, last_loss))
+        #     running_loss = 0
+        #     wer, cer = calculate_wer_and_cer(model)
+        #     print("WER on validation data")
+        #     print(wer)
+        #     print("CER on validation data")
+        #     print(cer)
+        #     performance_list.append({
+        #         "epoch": epoch_index,
+        #         "step_in_epoch": count + 1,
+        #         "wer": wer,
+        #         "cer": cer,
+        #         "train_loss": last_loss
+        #     })
+        #     model.train()
+    scheduler.step()
+    last_loss = running_loss / len(train_dataloader)
     return last_loss, performance_list
 
 
 def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, epochs: int = 5,
-                optimizer_name: str = "AdamW"):
-    batch_size = 4
+                optimizer_name: str = "AdamW", batch_size=4, scheduler_rates=None):
+    if scheduler_rates is None:
+        scheduler_rates = [1, 1]
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    writer = SummaryWriter('runs/fashion_trainer_{}'.format(timestamp))
     performance_list = []
 
     # # Load Tokenizer
@@ -247,7 +269,6 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
 
     # print_net_parameters(model)
     for name, param in model.named_parameters():
-        # if param.requires_grad and not f'decoder.blocks.{number_of_layers.get(model_size) - 1}.mlp' in name:  # Try only using MLP of 11
         if param.requires_grad and not any(layer_condition in name for layer_condition in layer_conditions):
             param.requires_grad = False
     # print_net_parameters(model)
@@ -259,43 +280,49 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
     else:
         optimizer = torch.optim.AdamW(non_frozen_parameters, lr=learning_rate)  # 0.0000001
 
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, scheduler_rates[0], gamma=scheduler_rates[1])
+    best_wer_epoch = -1
     print("Word Error Rate on Validation Data:")
     best_wer, best_cer = calculate_wer_and_cer(model)
     print(best_wer)
     print("CER on validation data")
     print(best_cer)
+    print("Vloss:")
+    vloss_start = calculate_vloss(model, eval_dataloader, loss_fn).item()
+    print(vloss_start)
+    print("WER on test data:")
+    test_wer_start, test_cer_start = calculate_wer_and_cer(model, validation=False)
+    print(test_wer_start)
+    print("CER on test data:")
+    print(test_cer_start)
+    print("WER on train data:")
+    train_wer_start, train_cer_start = calculate_wer_and_cer(model, validation=False, test=False)
+    print(train_wer_start)
+    print("CER on train data:")
+    print(train_cer_start)
     performance_list.append({
         "epoch": 0,
         "step_in_epoch": 0,
-        "wer": best_wer,
-        "cer": best_cer
+        "val_wer": best_wer,
+        "val_cer": best_cer,
+        "test_wer": test_wer_start,
+        "test_cer": test_cer_start,
+        "train_wer": train_wer_start,
+        "train_cer": train_cer_start,
+        "validation_loss": vloss_start
     })
 
     for epoch in range(epochs):
         print('EPOCH {}'.format(epoch + 1))
 
         model.train(True)
-        avg_loss, performance_list_epoch = train_one_epoch(epoch, writer, optimizer, train_dataloader, model, loss_fn)
+        avg_loss, performance_list_epoch = train_one_epoch(epoch, optimizer, train_dataloader, model, loss_fn,
+                                                           scheduler)
         model.train(False)
         model.eval()
         performance_list += performance_list_epoch
 
-        running_vloss = 0.0
-        with torch.no_grad():
-            for i, vdata in enumerate(eval_dataloader):
-                vinputs = vdata.get("input_ids").to(0)
-                vlabels = vdata.get('labels').to(0)
-                vdec_input_ids = vdata.get('dec_input_ids').to(0)
-                voutputs = model(vinputs, vdec_input_ids)
-                # vloss = loss_fn(voutputs, vlabels)
-                vloss = loss_fn(voutputs.view(-1, model.dims.n_vocab), vlabels.reshape(-1))
-                running_vloss += vloss
-                vinputs.detach()
-                vlabels.detach()
-                vdec_input_ids.detach()
-                torch.cuda.empty_cache()
-
-        avg_vloss = running_vloss / (i + 1)
+        avg_vloss = calculate_vloss(model, eval_dataloader, loss_fn).item()
         print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
 
         print("Word Error Rate on Validation Data:")
@@ -304,43 +331,93 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
         print("CER on validation data")
         print(avg_cer)
         print(avg_wer < best_wer)
+        print("WER on train data:")
+        train_wer, train_cer = calculate_wer_and_cer(model, validation=False, test=False)
+        print(train_wer)
+        print("CER on train data:")
+        print(train_cer)
+        print("WER on test data:")
+        test_wer, test_cer = calculate_wer_and_cer(model, validation=False)
+        print(test_wer)
+        print("CER on test data:")
+        print(test_cer)
         performance_list.append({
             "epoch": epoch,
-            "wer": avg_wer,
-            "cer": avg_cer,
+            "val_wer": avg_wer,
+            "val_cer": avg_cer,
+            "train_wer": train_wer,
+            "train_cer": train_cer,
+            "test_wer": test_wer,
+            "test_cer": test_cer,
             "train_loss": avg_loss,
             "validation_loss": avg_vloss
         })
 
         if avg_wer < best_wer or epoch == epochs - 1:
-            best_wer = avg_wer
-            checkpoint_path = 'model_checkpoint_{}_{}.pt'.format(timestamp, epoch)
-            torch.save({
-                'epoch': epoch,
-                'model_size': model_size,
-                'model_state_dict': model.state_dict(),
-                'loss': avg_loss,
-                'wer': avg_wer,
-                'cer': avg_cer,
-                'dims': model.dims
-            }, checkpoint_path)
+            if epoch == epochs - 1:
+                last_model_best = avg_wer < best_wer or best_wer_epoch < 0
+                best_wer = avg_wer
+                if last_model_best:
+                    test_wer, test_cer = calculate_wer_and_cer(model, validation=False)
+                else:
+                    best_model = whisper.load_model(f"{path}model_checkpoint_{timestamp}_{best_wer_epoch}.pt",
+                                                    local_model=True)
+                    test_wer, test_cer = calculate_wer_and_cer(best_model, validation=False)
+                print(f"Test WER = {test_wer}; Test CER = {test_cer}")
+                performance_list.append({"test_cer": test_cer, "test_wer": test_wer})
+                checkpoint_path = 'model_checkpoint_{}_{}.pt'.format(timestamp, epoch)
+                torch.save({
+                    'epoch': epoch,
+                    'model_size': model_size,
+                    'model_state_dict': model.state_dict(),
+                    'loss': avg_loss,
+                    'val_wer': avg_wer,
+                    'val_cer': avg_cer,
+                    'test_wer': test_wer,
+                    'test_cer': test_cer,
+                    'dims': model.dims,
+                    'active_settings': layer_conditions,
+                }, checkpoint_path)
+            else:
+                best_wer = avg_wer
+                checkpoint_path = 'model_checkpoint_{}_{}.pt'.format(timestamp, epoch)
+                torch.save({
+                    'epoch': epoch,
+                    'model_size': model_size,
+                    'model_state_dict': model.state_dict(),
+                    'loss': avg_loss,
+                    'val_wer': avg_wer,
+                    'val_cer': avg_cer,
+                    'dims': model.dims,
+                    'active_settings': layer_conditions
+                }, checkpoint_path)
+                best_wer_epoch = epoch
 
-    performance_path = f'model_performance_{timestamp}_{model_size}_{learning_rate}_{optimizer_name}_{epochs}_{batch_size}.csv'
+    performance_path = f'model_performance_{timestamp}_{model_size}_{learning_rate}_{optimizer_name}_{epochs}_{batch_size}_{random_seed}_decay{int(10 * scheduler_rates[1])}.csv'
     pd.DataFrame(performance_list,
-                 columns=["epoch", "wer", "cer", "train_loss", "validation_loss", "step_in_epoch"]).to_csv(
+                 columns=["epoch", "step_in_epoch", "train_wer", "train_cer", "val_wer", "val_cer", "train_loss",
+                          "validation_loss", "test_wer", "test_cer"]).to_csv(
         performance_path)
 
 
-for epoch_number in epochs_list:
-    for lr in learning_rates:
-        for active_layer_condition in active_layers_conditions:
-            for optimizer_type in optimizers:
-                torch.manual_seed(random_seed)
-                random.seed(random_seed)
-                np.random.seed(random_seed)
-                print(f"Number of Epochs: {epoch_number}")
-                print(f"Learning Rate: {lr}")
-                print(f"Layer Conditions: {active_layer_condition}")
-                print(f"Optimizer: {optimizer_type}")
-                train_model(model_size_, active_layer_condition, learning_rate=lr, epochs=epoch_number,
-                            optimizer_name=optimizer_type)
+for model_size_ in model_sizes:
+    active_layers_conditions = [[f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp']]  # ,
+    # [f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp.2']]
+    for random_seed in random_seeds:
+        for epoch_number in epochs_list:
+            for active_layer_condition in active_layers_conditions:
+                for lr in learning_rates:
+                    for scheduler_value in scheduler_values:
+                        for optimizer_type in optimizers:
+                            for train_batch_size in batch_sizes:
+                                torch.manual_seed(random_seed)
+                                random.seed(random_seed)
+                                np.random.seed(random_seed)
+                                print(f"Number of Epochs: {epoch_number}")
+                                print(f"Learning Rate: {lr}")
+                                print(f"Batch_size: {train_batch_size}")
+                                print(f"Layer Conditions: {active_layer_condition}")
+                                print(f"Optimizer: {optimizer_type}")
+                                train_model(model_size_, active_layer_condition, learning_rate=lr, epochs=epoch_number,
+                                            optimizer_name=optimizer_type, batch_size=train_batch_size,
+                                            scheduler_rates=scheduler_value)

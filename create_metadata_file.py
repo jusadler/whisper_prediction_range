@@ -4,12 +4,12 @@ import pandas as pd
 
 
 def create_metadata_file():
-    split = True
+    split = False
     validation = False
     test = False
     directory = "E"
     first_case = 0
-    last_case = 510  # TODO Regenerate
+    last_case = 400  # TODO Regenerate
     X_path = f"{directory}:/Notrufe/X_Data_Split/"
     y_path = f"{directory}:/Notrufe/y_data/"
     existing_ground_truth_cases = [i for i in range(first_case, last_case + 1) if exists(f'{y_path}{i}.txt')]
@@ -35,8 +35,10 @@ def create_metadata_file():
         metadata_df = pd.DataFrame(metadata_list, columns=["FilePath", "Transcription"])
         if validation:
             metadata_df.to_csv(f'{directory}:/Notrufe/metadata_validation.csv')
-        else:
+        elif test:
             metadata_df.to_csv(f"{directory}:/Notrufe/metadata_test.csv")
+        else:
+            metadata_df.to_csv(f"{directory}:/Notrufe/metadata.csv")
 
 
 create_metadata_file()
