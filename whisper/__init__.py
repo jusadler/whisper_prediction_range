@@ -133,7 +133,7 @@ def load_model(
     if name in _MODELS:
         checkpoint_file = _download(_MODELS[name], download_root, in_memory)
         alignment_heads = _ALIGNMENT_HEADS[name]
-    elif os.path.isfile(name):
+    elif os.path.isfile(name) or local_model:
         checkpoint_file = open(name, "rb").read() if in_memory else name
         alignment_heads = None
     else:

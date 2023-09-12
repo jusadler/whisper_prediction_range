@@ -34,7 +34,7 @@ os.chdir(path)
 
 metric = WordErrorRate()
 
-model_sizes = ["medium", "large-v1"]  # ["large", "base", "small", "medium", "tiny"]
+model_sizes = ["large", "large-v1"]  # ["large", "base", "small", "medium", "tiny"]
 
 number_of_layers = {
     "tiny": 4,
@@ -45,20 +45,20 @@ number_of_layers = {
     "large-v1": 32
 }
 
+# TODO Long Train for small learning rate that does not work
 # Grid
-learning_rates = [0.0001]  # [0.0001, 0.00001, 0.000001]  # [0.0005, 0.0001, 0.00005, 0.00001]
-scheduler_values = [[1, 0.8], [1, 0.7], [1, 0.6], [1, 0.5]]  # [[2, 0.9], [1, 0.9], [1, 0.8], [1, 1]]
-# TODO Try heavier decay (0.7 or lower) => Also for smaller models!!
+learning_rates = [0.0005, 0.0002]  # [0.0001, 0.00001, 0.000001]  # [0.0005, 0.0001, 0.00005, 0.00001]
+scheduler_values = [[1, 0.6], [1, 0.5]]  # [[2, 0.9], [1, 0.9], [1, 0.8], [1, 1]]
+# TODO Large-v1 with 0.0005 and 0.5 decay
 # optimizers = ["Adam", "AdamW", "SGD"]
 optimizers = ["AdamW"]
 # active_layers_conditions = [[f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp'], ['decoder.ln'],
 #                             [f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp', 'decoder.ln']]
-batch_sizes = [16]
+batch_sizes = [16, 64]
 epochs_list = [10]
 
 
 class EmergencyCallsDatasetLocal(torch.utils.data.Dataset):
-    # TODO NEED TO ADD PROMPT??!
     def __init__(self, annotations_path, tokenizer, data_to_gpu=True) -> None:
         super().__init__()
 
@@ -356,13 +356,9 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
         if avg_wer < best_wer or epoch == epochs - 1:
             if epoch == epochs - 1:
                 last_model_best = avg_wer < best_wer or best_wer_epoch < 0
-                best_wer = avg_wer
-                if last_model_best:
-                    test_wer, test_cer = calculate_wer_and_cer(model, validation=False)
-                else:
-                    best_model = whisper.load_model(f"{path}model_checkpoint_{timestamp}_{best_wer_epoch}.pt",
-                                                    local_model=True)
-                    test_wer, test_cer = calculate_wer_and_cer(best_model, validation=False)
+                if not last_model_best:
+                    test_wer = performance_list[best_wer_epoch + 1].get("test_wer")
+                    test_cer = performance_list[best_wer_epoch + 1].get("test_cer")
                 print(f"Test WER = {test_wer}; Test CER = {test_cer}")
                 performance_list.append({"test_cer": test_cer, "test_wer": test_wer})
                 checkpoint_path = 'model_checkpoint_{}_{}.pt'.format(timestamp, epoch)
@@ -410,9 +406,16 @@ for model_size_ in model_sizes:
                     for scheduler_value in scheduler_values:
                         for optimizer_type in optimizers:
                             for train_batch_size in batch_sizes:
+                                if (scheduler_value[1] == 0.6 and lr == 0.0005
+                                    and model_size_ == "large-v1" and train_batch_size == 16) or (
+                                        lr > 0.0001 and scheduler_value[1] > 0.65) or (
+                                        scheduler_value[1] == 0.5 and lr == 0.0001) or (
+                                        lr > 0.0002 and scheduler_value[1] > 0.65):
+                                    continue
                                 torch.manual_seed(random_seed)
                                 random.seed(random_seed)
                                 np.random.seed(random_seed)
+                                print(f"LR Scheduler Values: {scheduler_value}")
                                 print(f"Number of Epochs: {epoch_number}")
                                 print(f"Learning Rate: {lr}")
                                 print(f"Batch_size: {train_batch_size}")
