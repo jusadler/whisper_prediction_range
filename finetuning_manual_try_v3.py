@@ -26,15 +26,14 @@ torch.manual_seed(random_seeds[0])
 random.seed(random_seeds[0])
 np.random.seed(random_seeds[0])
 
-# Random Split for splitting dataset? https://www.youtube.com/watch?v=jF43_wj_DCQ
 # for decoder:
-decoding_options = {'language': 'de'}  # => Prompt can be added here as well!!!! TODO
+decoding_options = {'language': 'de'}
 path = "E:/Modelle/Full Training/"
 os.chdir(path)
 
 metric = WordErrorRate()
 
-model_sizes = ["large", "large-v1"]  # ["large", "base", "small", "medium", "tiny"]
+model_sizes = ["large"]  # ["large", "large-v1", "base", "small", "medium", "tiny"]
 
 number_of_layers = {
     "tiny": 4,
@@ -45,11 +44,9 @@ number_of_layers = {
     "large-v1": 32
 }
 
-# TODO Long Train for small learning rate that does not work
 # Grid
-learning_rates = [0.0005, 0.0002]  # [0.0001, 0.00001, 0.000001]  # [0.0005, 0.0001, 0.00005, 0.00001]
-scheduler_values = [[1, 0.6], [1, 0.5]]  # [[2, 0.9], [1, 0.9], [1, 0.8], [1, 1]]
-# TODO Large-v1 with 0.0005 and 0.5 decay
+learning_rates = [0.0001, 0.00001, 0.00005]  # [0.0001, 0.00001, 0.000001]  # [0.0005, 0.0001, 0.00005, 0.00001]
+scheduler_values = [[1, 0.6]]
 # optimizers = ["Adam", "AdamW", "SGD"]
 optimizers = ["AdamW"]
 # active_layers_conditions = [[f'decoder.blocks.{number_of_layers.get(model_size_) - 1}.mlp'], ['decoder.ln'],
@@ -388,6 +385,11 @@ def train_model(model_size, layer_conditions, learning_rate: float = 0.00001, ep
                     'active_settings': layer_conditions
                 }, checkpoint_path)
                 best_wer_epoch = epoch
+        # Addition to be able to try more parameters for training of large model
+        if epoch >= 2 and best_wer_epoch < 0 and best_wer < 0.9 * avg_wer and not (
+                batch_size == 16 and scheduler_value[1] == 0.6 and learning_rate == 0.0001):
+            epochs = epoch + 1
+            break
 
     performance_path = f'model_performance_{timestamp}_{model_size}_{learning_rate}_{optimizer_name}_{epochs}_{batch_size}_{random_seed}_decay{int(10 * scheduler_rates[1])}.csv'
     pd.DataFrame(performance_list,
@@ -406,11 +408,13 @@ for model_size_ in model_sizes:
                     for scheduler_value in scheduler_values:
                         for optimizer_type in optimizers:
                             for train_batch_size in batch_sizes:
-                                if (scheduler_value[1] == 0.6 and lr == 0.0005
-                                    and model_size_ == "large-v1" and train_batch_size == 16) or (
-                                        lr > 0.0001 and scheduler_value[1] > 0.65) or (
-                                        scheduler_value[1] == 0.5 and lr == 0.0001) or (
-                                        lr > 0.0002 and scheduler_value[1] > 0.65):
+                                if ((scheduler_value[1] != 0.6 or train_batch_size != 16 or lr != 0.00005)
+                                        and model_size_ == "large-v1"):
+                                    continue
+                                if model_size_ == "large" and ((
+                                                                       train_batch_size != 16 and lr != 0.0002 and
+                                                                       scheduler_value[1] != 0.6) or (
+                                                                       lr > 0.0001 and train_batch_size < 32)):
                                     continue
                                 torch.manual_seed(random_seed)
                                 random.seed(random_seed)
@@ -421,6 +425,13 @@ for model_size_ in model_sizes:
                                 print(f"Batch_size: {train_batch_size}")
                                 print(f"Layer Conditions: {active_layer_condition}")
                                 print(f"Optimizer: {optimizer_type}")
-                                train_model(model_size_, active_layer_condition, learning_rate=lr, epochs=epoch_number,
-                                            optimizer_name=optimizer_type, batch_size=train_batch_size,
-                                            scheduler_rates=scheduler_value)
+                                # Try is needed, as we want to scale up the batch size and don't want the whole script
+                                # to stop if cuda runs out of memory
+                                try:
+                                    train_model(model_size_, active_layer_condition, learning_rate=lr,
+                                                epochs=epoch_number,
+                                                optimizer_name=optimizer_type, batch_size=train_batch_size,
+                                                scheduler_rates=scheduler_value)
+                                except Exception as e:
+                                    print(e)
+                                    continue
